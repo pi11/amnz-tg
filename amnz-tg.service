@@ -1,0 +1,15 @@
+[Unit]
+Description=AmneziaWG Telegram bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/amnz-tg
+ExecStart=/opt/amnz-tg/.venv/bin/python /opt/amnz-tg/bot.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
