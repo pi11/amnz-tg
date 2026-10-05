@@ -22,7 +22,7 @@ CLIENT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z")
 @dataclass(frozen=True)
 class Config:
     token: str
-    admin_id: int
+    admin_ids: tuple[int, ...]
     script: Path
     output_dir: Path
     timeout: int
@@ -34,17 +34,23 @@ def load_config() -> Config:
     if not token:
         raise ValueError("BOT_TOKEN is required in .env")
     try:
-        admin_id = int(os.environ["ADMIN_TG_ID"])
         timeout = int(os.getenv("COMMAND_TIMEOUT_SECONDS", "120"))
-    except (KeyError, ValueError) as exc:
-        raise ValueError("ADMIN_TG_ID and COMMAND_TIMEOUT_SECONDS must be integers") from exc
-    if admin_id <= 0 or timeout <= 0:
-        raise ValueError("ADMIN_TG_ID and COMMAND_TIMEOUT_SECONDS must be positive")
+    except ValueError as exc:
+        raise ValueError("COMMAND_TIMEOUT_SECONDS must be an integer") from exc
+    if timeout <= 0:
+        raise ValueError("COMMAND_TIMEOUT_SECONDS must be positive")
+    raw_admin_ids = os.getenv("ADMIN_TG_ID", "")
+    try:
+        admin_ids = tuple(dict.fromkeys(int(value.strip()) for value in raw_admin_ids.split(",")))
+    except ValueError as exc:
+        raise ValueError("ADMIN_TG_ID must be a comma-separated list of positive integers") from exc
+    if any(admin_id <= 0 for admin_id in admin_ids):
+        raise ValueError("ADMIN_TG_ID must be a comma-separated list of positive integers")
     script = Path(os.getenv("MANAGE_SCRIPT", "/root/awg/manage_amneziawg.sh"))
     output_dir = Path(os.getenv("CLIENT_OUTPUT_DIR", "/root/awg"))
     if not script.is_absolute() or not output_dir.is_absolute():
         raise ValueError("MANAGE_SCRIPT and CLIENT_OUTPUT_DIR must be absolute paths")
-    return Config(token, admin_id, script, output_dir, timeout)
+    return Config(token, admin_ids, script, output_dir, timeout)
 
 
 def create_client(config: Config, name: str) -> tuple[Path, str]:
@@ -88,7 +94,7 @@ async def check_admin(update: Update, config: Config) -> bool:
     message = update.effective_message
     if message is None:
         return False
-    if update.effective_user is None or update.effective_user.id != config.admin_id:
+    if update.effective_user is None or update.effective_user.id not in config.admin_ids:
         await message.reply_text("Access denied.")
         return False
     if update.effective_chat is None or update.effective_chat.type != "private":
@@ -125,21 +131,26 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     LOG.info("Client %s created by Telegram user %s", name, update.effective_user.id)
-    try:
-        with qr_path.open("rb") as qr_file:
-            await context.bot.send_photo(chat_id=config.admin_id, photo=qr_file, caption=f"Amnezia client: {name}")
-        if len(uri) <= 4000:
-            await context.bot.send_message(chat_id=config.admin_id, text=uri)
-        else:
-            uri_path = config.output_dir / f"{name}.vpnuri"
-            with uri_path.open("rb") as uri_file:
-                await context.bot.send_document(chat_id=config.admin_id, document=uri_file, filename=uri_path.name)
-    except (OSError, TelegramError):
-        LOG.exception("Client %s was created but Telegram delivery failed", name)
+    recipients = (update.effective_user.id, *(admin_id for admin_id in config.admin_ids if admin_id != update.effective_user.id))
+    failed_ids = []
+    for admin_id in recipients:
         try:
-            await message.reply_text("Client was created, but delivery failed. Retrieve its files on the server; do not run /add again.")
+            with qr_path.open("rb") as qr_file:
+                await context.bot.send_photo(chat_id=admin_id, photo=qr_file, caption=f"Amnezia client: {name}")
+            if len(uri) <= 4000:
+                await context.bot.send_message(chat_id=admin_id, text=uri)
+            else:
+                uri_path = config.output_dir / f"{name}.vpnuri"
+                with uri_path.open("rb") as uri_file:
+                    await context.bot.send_document(chat_id=admin_id, document=uri_file, filename=uri_path.name)
+        except (OSError, TelegramError):
+            failed_ids.append(admin_id)
+            LOG.exception("Client %s was created but delivery to admin %s failed", name, admin_id)
+    if failed_ids:
+        try:
+            await message.reply_text(f"Client was created, but delivery failed for admin ID(s): {', '.join(map(str, failed_ids))}. Retrieve files on the server; do not run /add again.")
         except TelegramError:
-            LOG.exception("Could not notify admin about delivery failure")
+            LOG.exception("Could not notify requesting admin about delivery failure")
 
 
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -163,7 +174,7 @@ def main() -> None:
     app.add_handler(CommandHandler("add", add))
     app.add_handler(TypeHandler(Update, unknown))
     app.add_error_handler(on_error)
-    LOG.info("Bot starting; admin_id=%s", config.admin_id)
+    LOG.info("Bot starting; admin_ids=%s", config.admin_ids)
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
