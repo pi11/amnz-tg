@@ -1,6 +1,6 @@
 # AmneziaWG Telegram bot
 
-An admin-only Telegram bot that runs `manage_amneziawg.sh add <client_name>` and sends the generated QR image and `vpn://` URI to every configured admin. The bot uses long polling and logs received Telegram updates with their user and chat IDs to the systemd journal.
+An admin-only Telegram bot that runs `manage_amneziawg.sh add <client_name>` and sends the generated QR image and `vpn://` URI to the admin who requested the client. The bot uses long polling and logs received Telegram updates with their user and chat IDs to the systemd journal.
 
 ## Configuration
 
@@ -35,6 +35,6 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now amnz-tg.service
 ```
 
-Check status and logs with `systemctl status amnz-tg.service` and `journalctl -u amnz-tg.service -f`. Each admin must start a private chat with the bot before it can send them files. Send `/add serge-mobile2` from one of those chats. The bot sends the PNG as a photo and the URI as text (or a `.vpnuri` document if it is too long for one message) to every admin.
+Check status and logs with `systemctl status amnz-tg.service` and `journalctl -u amnz-tg.service -f`. An admin must start a private chat with the bot and send `/add serge-mobile2`. The bot sends the PNG as a photo and the URI as text (or a `.vpnuri` document if it is too long for one message) only to that admin.
 
-Client names must contain 1–64 ASCII letters, digits, `_`, or `-` and start with a letter or digit. The bot refuses to run the script if either output file already exists. If creation succeeds but delivery to an admin fails, it continues sending to the other admins and reports the failed IDs to the requester. The files remain on the server; inspect them before retrying with a new name. Requests from other accounts are denied, but their IDs and messages are still logged.
+Client names must contain 1–64 ASCII letters, digits, `_`, or `-` and start with a letter or digit. The bot refuses to run the script if either output file already exists. If creation succeeds but Telegram delivery fails, the files remain on the server; inspect them before retrying with a new name. Requests from other accounts are denied, but their IDs and messages are still logged.

@@ -131,24 +131,19 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     LOG.info("Client %s created by Telegram user %s", name, update.effective_user.id)
-    recipients = (update.effective_user.id, *(admin_id for admin_id in config.admin_ids if admin_id != update.effective_user.id))
-    failed_ids = []
-    for admin_id in recipients:
+    try:
+        with qr_path.open("rb") as qr_file:
+            await context.bot.send_photo(chat_id=update.effective_user.id, photo=qr_file, caption=f"Amnezia client: {name}")
+        if len(uri) <= 4000:
+            await context.bot.send_message(chat_id=update.effective_user.id, text=uri)
+        else:
+            uri_path = config.output_dir / f"{name}.vpnuri"
+            with uri_path.open("rb") as uri_file:
+                await context.bot.send_document(chat_id=update.effective_user.id, document=uri_file, filename=uri_path.name)
+    except (OSError, TelegramError):
+        LOG.exception("Client %s was created but delivery to admin %s failed", name, update.effective_user.id)
         try:
-            with qr_path.open("rb") as qr_file:
-                await context.bot.send_photo(chat_id=admin_id, photo=qr_file, caption=f"Amnezia client: {name}")
-            if len(uri) <= 4000:
-                await context.bot.send_message(chat_id=admin_id, text=uri)
-            else:
-                uri_path = config.output_dir / f"{name}.vpnuri"
-                with uri_path.open("rb") as uri_file:
-                    await context.bot.send_document(chat_id=admin_id, document=uri_file, filename=uri_path.name)
-        except (OSError, TelegramError):
-            failed_ids.append(admin_id)
-            LOG.exception("Client %s was created but delivery to admin %s failed", name, admin_id)
-    if failed_ids:
-        try:
-            await message.reply_text(f"Client was created, but delivery failed for admin ID(s): {', '.join(map(str, failed_ids))}. Retrieve files on the server; do not run /add again.")
+            await message.reply_text("Client was created, but delivery failed. Retrieve files on the server; do not run /add again.")
         except TelegramError:
             LOG.exception("Could not notify requesting admin about delivery failure")
 
